@@ -1,0 +1,315 @@
+// Haejin Lee
+// AST Interpreter
+
+// Given a state object and an AST of an expression as arguments,
+// interpExpression returns the result of the expression (number or boolean)
+// interpExpression(state: State, e: Expr): number | boolean
+function interpExpression(state, e) {
+  switch (e.kind) { // switch statement for e.kind
+    case 'boolean':
+    case 'number': { return e.value;} // return value for both boolean and number expressions
+    case 'operator': {
+
+      if (!lib220.getProperty(e, 'e1').found || !lib220.getProperty(e, 'e2').found) { // if we are missing e1 or e2
+        console.log('error: missing e1 or e2');
+        assert(false);
+      }
+  
+      let v1 = interpExpression(state, e.e1); // call interpExpression for e.e1, store as v1
+      let v2 = interpExpression(state, e.e2); // call interpExpression for e.e2, store as v2
+
+      //  handle infinity and NaN; reset the string values as number values
+      if (v1.toString() === 'Infinity') { v1 = Infinity;} 
+      else if (v1.toString() === '-Infinity') { v1 = -Infinity;}
+      else if (v1.toString() === 'NaN') { v1 = NaN;}
+      if (v2.toString() === 'Infinity') { v2 = Infinity;}
+      else if (v2.toString() === '-Infinity') { v2 = -Infinity;}
+      else if (v2.toString() === 'NaN') { v2 = NaN;}
+
+      switch (e.op) { // switch cases for e.op
+        case '+': { 
+          if (typeCheck(v1,v2,"number")) { return v1 + v2;} // typecheck v1, v2 to be equal to each other and equal to number, return v1+v2
+          else { console.log('+ operator requires two numbers'); assert(false);} // if typecheck fails
+        } 
+        case '-': { 
+          if (typeCheck(v1,v2,"number")) { return v1 - v2;} // typecheck v1, v2 to be equal to each other and equal to number, return v1-v2
+          else { console.log('- operator requires two numbers'); assert(false);} // if typecheck fails
+        } 
+        case '*': { 
+          if (typeCheck(v1,v2,"number")) { return v1 * v2;}
+          else { console.log('* operator requires two numbers'); assert(false);}
+        } 
+        case '/': { 
+          if (typeCheck(v1,v2,"number")) { return v1 / v2;}
+          else { console.log('/ operator requires two numbers'); assert(false);}
+        } 
+        case '&&': { 
+          if (typeCheck(v1,v2,"boolean")) { return !v1? v1: v2;}
+          else { console.log('&& operator requires two boolean values'); assert(false);}
+        } 
+        case '||': { 
+          if (typeCheck(v1,v2,"boolean")) { return v1? v1: v2;}
+          else { console.log('|| operator requires two boolean values'); assert(false);}
+        }
+        case '>': { 
+          if (typeCheck(v1,v2,"number")) { return v1 > v2;}
+          else { console.log('> operator requires two numbers'); assert(false);}
+        } 
+        case '<': { 
+          if (typeCheck(v1,v2,"number")) { return v1 < v2;}
+          else { console.log('< operator requires two numbers'); assert(false);}
+        } 
+        case '===': { return v1 === v2;} // no type checking required for ===
+
+        default: { 
+          console.log('error: '+e.op+' is not a binary operator'); // default message if not any of the above cases
+          assert(false);
+        }
+      }
+    }
+    case 'variable': { // if e.kind === variable
+      if (e.name === 'Infinity' || e.name === '-Infinity' || e.name === 'NaN') { return e.name;} // handle +-Infinity/NaN case, just return the string value
+      function recurScope(state){ 
+        let v = lib220.getProperty(state, e.name) // v stores the variable property in the current scope
+        if (v.found) { 
+          return v.value; // if v is found and isn't Infinity or NaN, return its value
+        } 
+        else {
+          let outer = lib220.getProperty(state, 'outer') // outer stores the outer property in the inner scope (link)
+          if (outer.found) { return recurScope(outer.value)} // if the link to an outer scope exists, call recurScope on the outer scope
+        }
+        console.log('error: variable '+e.name+' was not found')
+        assert(false) // if we don't find the variable or an outer scope, assert false
+      }
+      return recurScope(state); // call recurScope and return it
+    }
+    default : { // default case if e.kind is none of the above cases
+      console.log('error: '+e.kind+' is an unknown expression: '); 
+      assert(false);
+    }
+  }
+}
+
+
+const typeCheck = (v1,v2, type) => typeof(v1) === typeof(v2) && typeof(v1) === type && typeof(v2) === type;
+const add = (obj, prop, val) => lib220.setProperty(obj, prop, val);
+const isDeclared = (obj, prop) => lib220.getProperty(obj, prop).found;
+
+// The State type is defined further below.
+// Given a state object and an AST of a statement,
+// interpStatement updates the state object and returns nothing
+// interpStatement(state: State, p: Stmt): void
+function interpStatement(state, p) {
+  switch(p.kind) { // switch statement for p.kind
+    case 'let': { 
+      if (isDeclared(state, p.name)) { // check if duplicate declaration
+        console.log(p.name+" has already been declared");
+        assert(false);
+      } else {
+        let value = interpExpression(state, p.expression); // evaluate the value of the expression and store as value
+        add(state, p.name, value); // add the value to the state object
+      }
+      break;
+    }
+    case 'assignment': {
+      function assign(state) { // helper function
+        if (isDeclared(state, p.name)) {
+          let value = interpExpression(state, p.expression); // evaluate the value of the expression and store as value
+          add(state, p.name, value); // assign the new value to the variable in the current scope 
+          return;
+        }
+        else {
+          let outer = lib220.getProperty(state, 'outer'); // outer stores the outer property in the inner scope (link)
+          if (outer.found) { return assign(outer.value);} // if the link to an outer scope exists, call recurScope on the outer scope
+        }
+        // if variable was never declared in any of the scopes:
+        console.log(p.name+" has not been declared yet");
+        assert(false);
+      }
+      assign(state);
+      break;
+    }
+    case 'if': { 
+      if (interpExpression(state, p.test)) { // if p.test returns true
+        interpBlock(state, p.truePart); // enter new block and run p.truePart
+      } else { // if p.test returns false
+        interpBlock(state, p.falsePart); // enter new block and run p.falsePart
+      }
+      break;
+    } 
+    case 'while': {
+      while (interpExpression(state, p.test)) { // while p.test returns true
+        interpBlock(state, p.body); // enter a new block and run p.body
+      }
+      break;
+    }
+    case 'print': { 
+      console.log(interpExpression(state, p.expression)); // print what's returned by interpreting p.expression
+      break;
+    }
+    default: { console.log("unknown statement: "+p.kind); } // default message if none of the above cases are true
+  }
+}
+
+function interpBlock(outer, block) {
+  let inner = {};  // create new scope --> inner scope
+  add(inner, 'outer', outer); // link the inner scope to the enclosing outerscope
+  block.forEach(s => interpStatement(inner, s)); // evaluate each statement in the block
+}
+
+// Given the AST of a program,
+// interpProgram returns the final state of the program
+// interpProgram(p: Stmt[]): State
+function interpProgram(p) {
+  let state = {};
+  p.forEach(e => interpStatement(state, e)); // iterate through p statements array
+  return state; // return the modified state
+}
+
+
+// TESTING
+let program1 = [
+  { kind: "let", name: "x", expression: {
+    kind: "number", value:1}
+  },
+  { kind: "let", name: "y", expression: {
+    kind: "operator", op: "===", 
+    e1: { kind: "variable", name: "x"},
+    e2: { kind: "number", value: 3}}
+  },
+  {
+    kind: "if", 
+    test: {
+      kind: "operator", op: "||", 
+      e1: { kind: "variable", name: "y"},
+      e2: { kind: "boolean", value: false}
+    },
+    truePart: [
+      { kind: "assignment", 
+        name: "x", 
+        expression: {
+          kind: "operator", 
+          op: "+",
+          e1: {kind: "variable", name: "x"}, 
+          e2: {kind: "number", value: 5}
+          } 
+      }
+    ],
+    falsePart: [
+      { kind: "assignment", 
+        name: "x", 
+        expression: {
+          kind: "number", 
+          value: 10
+        } 
+      }
+    ]
+  }
+];
+
+let program2 = [
+  { kind: "let", name: "x", expression: {
+    kind: "number", value:1}
+  },
+  { kind: "let", name: "y", expression: {
+    kind: "operator", op: "===", 
+    e1: { kind: "variable", name: "x"},
+    e2: { kind: "number", value: 1}}
+  },
+  {
+    kind: "if", 
+    test: {
+      kind: "operator", op: "||", 
+      e1: { kind: "variable", name: "y"},
+      e2: { kind: "boolean", value: false}
+    },
+    truePart: [
+      { kind: "let", name: "x", expression: {
+        kind: "number", value:100}},
+      { kind: "assignment", 
+        name: "x", 
+        expression: {
+          kind: "operator", 
+          op: "+",
+          e1: {kind: "variable", name: "x"}, 
+          e2: {kind: "number", value: 5}
+          } 
+      }
+    ],
+    falsePart: [
+      { kind: "assignment", 
+        name: "x", 
+        expression: {
+          kind: "number", 
+          value: 10
+        } 
+      }
+    ]
+  }
+];
+
+let program3 = [
+  {kind: 'print', expression: { kind: 'operator', op: '-', e1: {
+    kind: 'variable', name: 'Infinity'}, e2: { kind: 'variable', name: 'Infinity'}}
+  }
+]
+
+let state1 = { x: 10, y: 5};
+let state2 = {a: true, b: true, c: false};
+
+test("numerical operations with one variable", function() {
+  assert(interpExpression(state1, parser.parseExpression("x + 2").value) === 12);
+  assert(interpExpression(state1, parser.parseExpression("x - 2").value) === 8);
+  assert(interpExpression(state1, parser.parseExpression("x * 2").value) === 20);
+  assert(interpExpression(state1, parser.parseExpression("x / 2").value) === 5);
+});
+test("numerical operations with two variables", function() {
+  assert(interpExpression(state1, parser.parseExpression("x + y").value) === 15);
+  assert(interpExpression(state1, parser.parseExpression("x - y").value) === 5);
+  assert(interpExpression(state1, parser.parseExpression("x > y").value));
+  assert(interpExpression(state1, parser.parseExpression("y < x").value));
+  assert(!interpExpression(state1, parser.parseExpression("y === x").value));
+});
+test("interpret boolean expressions", function() {
+  assert(interpExpression(state2, parser.parseExpression("a === b").value));
+  assert(!interpExpression(state2, parser.parseExpression("a && c").value));
+  assert(interpExpression(state2,parser.parseExpression("a || c").value));
+  assert(!interpExpression(state2,parser.parseExpression("a === c").value));
+});
+test("test if statement", function() {
+  let s = interpProgram(program1);
+  assert(lib220.getProperty(s,'x').value === 10);
+  assert(lib220.getProperty(s,'y').value === false);
+});
+test("test Infinity works properly for expressions", function() {
+  assert(interpExpression({}, parser.parseExpression("Infinity-Infinity").value).toString() === 'NaN');
+  assert(interpExpression({}, parser.parseExpression("Infinity/Infinity").value).toString() === 'NaN');
+  assert(interpExpression({}, parser.parseExpression("Infinity*Infinity").value) === Infinity);
+  let expression = {
+    value: {
+      kind: "operator",
+      op: "*",
+      e1: {
+        kind: "variable",
+        name: "-Infinity"
+      },
+      e2: {
+        kind: "variable",
+        name: "-Infinity"
+      }
+    },
+    kind: "ok"
+  }
+  assert(interpExpression({}, expression.value) === Infinity);
+});
+test("test negligent inner scope", function() {
+  let s = interpProgram(program2);
+  assert(lib220.getProperty(s,'x').value === 1);
+  assert(lib220.getProperty(s,'y').value === true);
+});
+test("test print works on Infinity", function() {
+  assert(Object.keys(interpProgram(program3)).length === 0);
+});
+test("division by 0", function() {
+  assert(interpExpression({}, parser.parseExpression("5/0").value) === Infinity); 
+});
